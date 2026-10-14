@@ -1,0 +1,36 @@
+{
+  "labels": [
+    {
+      "id": 1,
+      "short_name": "NAME",
+      "color": "#ff2828",
+      "aliases": [
+        "PER"
+      ]
+    },
+    {
+      "id": 2,
+      "short_name": "MAIL",
+      "color": "#00c477",
+      "aliases": []
+    },
+    {
+      "id": 3,
+      "short_name": "TEL",
+      "color": "#32b5f7",
+      "aliases": []
+    },
+    {
+      "id": 4,
+      "short_name": "ADDRESS",
+      "color": "#ff751b",
+      "aliases": []
+    }
+  ],
+  "settings": {
+    "config_path": "/Users/leyton/Documents/python/gbNERa/config.json",
+    "input_path": "/Users/leyton/Documents/python/gbNERa/sample_data.txt",
+    "database_path": "annotations.csv",
+    "inference_url": "http://127.0.0.1:8081/inference"
+  }
+}

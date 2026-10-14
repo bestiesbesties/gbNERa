@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>gbNERa · Text labeling</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+<main>
+  <header class="livebar" aria-label="Files and inference settings">
+    {% for key, title, icon, placeholder in [('config_path', 'General config JSON', 'general_config', '/path/to/config.json'), ('input_path', 'Input TXT file', 'input_txt-file', '/path/to/texts.txt'), ('database_path', 'CSV database', 'csv-database', '/path/to/annotations.csv'), ('inference_url', 'Inference endpoint', 'inference_endpoint', 'http://localhost:8080/predict')] %}
+    <form class="live-item" data-key="{{ key }}">
+      <div class="live-icon"><img src="/icons/{{ icon }}.png" alt="{{ title }}"><img class="status" src="/icons/not-connected.png" alt="Not configured"></div>
+      <label class="sr-only" for="{{ key }}">{{ title }}</label>
+      <input id="{{ key }}" placeholder="{{ placeholder }}" autocomplete="off" spellcheck="false" title="{{ title }} — press Enter to apply">
+      <button class="sr-only" type="submit">Apply {{ title }}</button>
+    </form>
+    {% endfor %}
+  </header>
+  <section class="central-container" aria-label="Annotation editor">
+    <div class="editor-body">
+      <div class="text-heading"><div><strong id="counter">0/0</strong><span id="hash">No text loaded</span></div><button id="edit" class="icon-button" title="Edit text" aria-label="Edit text"><img src="/icons/edit.png" alt=""></button></div>
+      <div id="text" tabindex="0" aria-label="Select text to label"></div>
+      <div id="edit-area" hidden><label class="sr-only" for="edit-text">Text</label><textarea id="edit-text"></textarea><p>Enter applies the edit; Escape cancels. Applying an edit clears all labels and removes the old text from the database. The edited text must be saved explicitly.</p></div>
+      <div class="panel-bottom"><span id="text-status"></span><div class="controls"><button id="save-changes" hidden>Save changes</button><button id="previous" class="icon-button" title="Previous text" aria-label="Previous text"><img src="/icons/previous.png" alt=""></button><button id="next" class="icon-button" title="Next text" aria-label="Next text"><img src="/icons/next.png" alt=""></button><button id="saved" class="icon-button" role="checkbox" aria-checked="false" title="Save text to database" aria-label="Save text to database"><img src="/icons/checkbox_unchecked.png" alt=""></button></div></div>
+    </div>
+    <footer id="labels" class="lower-container" aria-label="Annotation labels"></footer>
+  </section>
+  <p id="message" role="status">Enter file paths above and press Enter to apply. Select text, then choose a label. Click a span to remove it.</p>
+</main>
+</body>
+</html>
