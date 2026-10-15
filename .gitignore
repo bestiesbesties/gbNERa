@@ -3,3 +3,4 @@ __pycache__/
 *.pyc
 .DS_Store
 annotations.csv
+sample_data.txt

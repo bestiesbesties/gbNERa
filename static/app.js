@@ -88,6 +88,13 @@ function render() {
         span.className = 'annotation';
         span.textContent = chars.slice(start, end).join('');
         span.dataset.label = name;
+        // A zero-width inline anchor stays on the first line of a wrapped span.
+        // Keep the badge in a pseudo-element so it cannot affect text offsets.
+        const anchor = document.createElement('span');
+        anchor.className = 'annotation-label-anchor';
+        anchor.dataset.label = name;
+        anchor.setAttribute('aria-hidden', 'true');
+        span.prepend(anchor);
         span.style.setProperty('--color', state.config.labels.find(label => label.short_name === name)?.color || '#777777');
         span.title = `${name} · click to remove`;
         span.addEventListener('click', () => {
@@ -195,6 +202,16 @@ $('edit-text').addEventListener('keydown', event => {
     event.preventDefault();
     mutate('edit', {text: $('edit-text').value});
   }
+});
+document.addEventListener('keydown', event => {
+  if (event.defaultPrevented || event.isComposing || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+  if (editing || event.target.isContentEditable || event.target.closest('input, textarea, select')) return;
+  const control = {ArrowLeft: 'previous', ArrowRight: 'next', Enter: 'saved'}[event.key];
+  if (!control) return;
+  // Override native button activation so Enter always toggles Saved exactly once.
+  event.preventDefault();
+  if (busy || (event.key === 'Enter' && event.repeat)) return;
+  $(control).click();
 });
 function schedulePoll() {
   clearTimeout(pollTimer);

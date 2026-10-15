@@ -19,6 +19,8 @@ Enter a path or endpoint in the livebar and press **Enter** to apply it. Paths r
 
 Select text and click a colored label button. Click an annotated span to remove it. Overlapping spans are rejected. Navigate with the arrows; manual annotation changes stay in memory during navigation. Untouched predictions are discarded when leaving a text.
 
+**Right Arrow** moves to the next text, **Left Arrow** moves to the previous text, and **Enter** toggles the saved checkbox. These shortcuts pause while typing in settings fields or editing the main text. In the text editor, **Enter** applies edits and arrow keys move the cursor without navigating between texts.
+
 The checkbox shows whether a text is in the CSV. Checking it saves the text and its current labels; unchecking it removes the row. Changes to an already saved text's annotations stay in memory until you click **Save changes**. Predictions never save automatically.
 
 The edit icon opens a text field. **Enter** applies the edit; **Escape** cancels it. Applying an edit removes the old saved row, clears all annotations and changes the SHA-256 hash. The changed text remains unsaved. The source TXT is not rewritten. Identical input lines share annotations and editing one updates all identical occurrences in the current session. Editing into another existing text is rejected to avoid replacing its annotations.
