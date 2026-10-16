@@ -23,7 +23,9 @@ main { max-width: 1422px; width: calc(100% - 80px); margin: 65px auto 50px; }
 .annotation-label-anchor::after { content: attr(data-label); position: absolute; top: 100%; left: 0; width: max-content; white-space: nowrap; overflow-wrap: normal; background: var(--color); color: #fff; font-size: 14px; font-weight: bold; line-height: 1.3; padding: 1px 4px; margin-top: 5px; pointer-events: none; }
 .annotation:hover { background: #0000000b; }
 .panel-bottom { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-top: auto; padding-top: 22px; }
-#text-status { font-size: 14px; color: #777; }
+.annotation-status { min-width: 0; overflow-wrap: anywhere; }
+#annotation-list { margin-top: 6px; white-space: pre-wrap; }
+#text-status, #annotation-list { font-size: 14px; color: #777; }
 .controls { display: flex; align-items: center; gap: 18px; }
 button { cursor: pointer; font: inherit; }
 .icon-button { border: 0; background: transparent; padding: 0; width: 52px; height: 60px; flex-shrink: 0; }

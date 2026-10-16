@@ -66,6 +66,57 @@ class EditorTests(unittest.TestCase):
         self.change('remove')
         self.assertTrue(editor.load_database(str(self.csv)).empty)
 
+    def test_csv_round_trip_punctuation_and_multiline(self):
+        text = '😀 Hello, "Jane", john@example.com\n• Second line, more text\r\nLast line'
+        self.assertEqual(self.change('edit', text=text).status_code, 200)
+        start = text.index('john@')
+        labels = [[start, start + len('john@example.com'), 'MAIL']]
+        self.change('labels', labels=labels)
+        self.assertEqual(self.change('save').status_code, 200)
+        frame = editor.load_database(str(self.csv))
+        self.assertEqual(frame.iloc[0]['text'], text)
+        self.assertEqual(json.loads(frame.iloc[0]['labels']), labels)
+        self.assertEqual(frame.iloc[0]['hash_key'], editor.text_hash(text))
+
+    def test_txt_commas_quotes_and_entities(self):
+        self.source.write_text('Hello, "Jane", &bull; &amp; &#x1F600;\n', encoding='utf-8')
+        editor.initialize(str(self.config))
+        self.assertEqual(self.record()['text'], 'Hello, "Jane", • & 😀')
+        self.assertEqual(self.record()['hash_key'], editor.text_hash(self.record()['text']))
+
+    def test_legacy_entity_spans_are_migrated_and_stable(self):
+        raw = '&amp;bull; Contact john@example.com &amp; team'
+        start = raw.index('john@')
+        frame = editor.pd.DataFrame([[1, editor.text_hash(raw), raw,
+            json.dumps([[start, start + 16, 'MAIL']]), True]], columns=editor.COLUMNS)
+        self.csv.write_text(frame.to_csv(index=False), encoding='utf-8')
+        self.source.write_text(raw + '\n', encoding='utf-8')
+        editor.initialize(str(self.config))
+        self.assertTrue(self.record()['saved'])
+        self.assertEqual(self.record()['text'], '• Contact john@example.com & team')
+        self.assertEqual(self.record()['labels'], [[10, 26, 'MAIL']])
+        self.assertEqual(self.change('save').status_code, 200)
+        editor.initialize(str(self.config))
+        self.assertEqual(self.record()['labels'], [[10, 26, 'MAIL']])
+        self.assertTrue(self.record()['saved'])
+
+    def test_entity_boundary_and_collision_rejected(self):
+        with self.assertRaisesRegex(ValueError, 'inside an HTML entity'):
+            editor.decode_text('&bull; hello', [[1, 4, 'MAIL']])
+        rows = [[index, editor.text_hash(text), text, '[]', False]
+                for index, text in enumerate(['&bull; hello', '• hello'])]
+        self.csv.write_text(editor.pd.DataFrame(rows, columns=editor.COLUMNS).to_csv(index=False))
+        editor.initialize(str(self.config))
+        self.assertEqual(editor.status['database_path'][0], 'error')
+        original = self.csv.read_bytes()
+        self.assertEqual(self.change('save').status_code, 400)
+        self.assertEqual(self.csv.read_bytes(), original)
+
+    def test_malformed_comma_csv_is_not_silently_shifted(self):
+        self.csv.write_text(','.join(editor.COLUMNS) + '\n1,hash,Hello, Jane,[],False\n')
+        with self.assertRaisesRegex(ValueError, 'Invalid CSV row'):
+            editor.load_database(str(self.csv))
+
     def test_invalid_database_is_not_overwritten(self):
         self.csv.write_text('invalid,csv\n1,2\n')
         editor.initialize(str(self.config))

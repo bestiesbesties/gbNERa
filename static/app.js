@@ -70,7 +70,8 @@ function render() {
   $('saved').querySelector('img').src = `/icons/checkbox_${record?.saved ? 'checked' : 'unchecked'}.png`;
   $('save-changes').hidden = !(record?.saved && record.dirty);
   $('save-changes').disabled = busy || editing;
-  $('text-status').textContent = !record ? '' : record.dirty ? 'Unsaved annotation changes' : record.saved ? 'Saved in database' : record.prediction === 'pending' ? 'Predicting in the background…' : record.prediction === 'error' ? 'Prediction failed: ' + (record.prediction_error || 'Unknown error') : record.prediction === 'ready' ? 'Predictions ready · not saved' : 'Not saved';
+  $('text-status').textContent = !record ? '' : record.dirty ? (record.saved ? 'Saved in database · unsaved annotation changes' : 'Not saved · unsaved annotation changes') : record.saved ? 'Saved in database' : record.prediction === 'pending' ? 'Predicting in the background…' : record.prediction === 'error' ? 'Prediction failed: ' + (record.prediction_error || 'Unknown error') : record.prediction === 'ready' ? 'Predictions ready · not saved' : 'Not saved';
+  $('annotation-list').textContent = record ? '[' + record.labels.map(item => '[' + item.map(value => JSON.stringify(value)).join(', ') + ']').join(', ') + ']' : '';
   const signature = JSON.stringify([active, record?.text, record?.labels, state.config.labels]);
   if (signature !== rendered && !editing) {
     rendered = signature;
@@ -138,7 +139,11 @@ function applyLabel(name) {
   const record = current();
   if (busy || editing || !record) return;
   if (!selection) return message('Select part of the text first.');
-  const [start, end] = selection;
+  let [start, end] = selection;
+  const chars = Array.from(record.text);
+  while (start < end && /\s/u.test(chars[start])) start++;
+  while (end > start && /\s/u.test(chars[end - 1])) end--;
+  if (start === end) return message('Select text containing more than whitespace.');
   if (record.labels.some(([a, b]) => start < b && end > a)) return message('Annotations cannot overlap. Click the existing span to remove it first.', true);
   mutate('labels', {labels: [...record.labels, [start, end, name]]});
 }

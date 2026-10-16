@@ -1,5 +1,8 @@
 """A small, single-user NER editor. Run with: python app.py."""
+import csv
 import hashlib
+import html
+import re
 import json
 import os
 from pathlib import Path
@@ -26,6 +29,48 @@ active_key = None
 
 def text_hash(text):
     return hashlib.sha256(text.encode('utf-8')).hexdigest()
+
+
+# Require a semicolon so ordinary text such as "AT&T" stays untouched.
+ENTITY = re.compile(r'&(?:#[0-9]+|#[xX][0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]+);')
+
+
+def decode_text(text, labels=None):
+    """Canonicalize entities and translate saved Unicode span boundaries."""
+    labels = [list(item) for item in (labels or [])]
+    while True:
+        pieces, boundaries, cursor, size = [], {0: 0}, 0, 0
+        for match in ENTITY.finditer(text):
+            replacement = html.unescape(match.group())
+            if replacement == match.group():
+                continue
+            for index in range(cursor, match.start() + 1):
+                boundaries[index] = size + index - cursor
+            pieces.append(text[cursor:match.start()])
+            size += match.start() - cursor
+            pieces.append(replacement)
+            size += len(replacement)
+            cursor = match.end()
+            boundaries[cursor] = size
+        if cursor == 0:
+            return text, labels
+        for index in range(cursor, len(text) + 1):
+            boundaries[index] = size + index - cursor
+        pieces.append(text[cursor:])
+        for item in labels:
+            if item[0] not in boundaries or item[1] not in boundaries:
+                raise ValueError('A saved annotation ends inside an HTML entity; correct its boundaries before importing.')
+            item[0], item[1] = boundaries[item[0]], boundaries[item[1]]
+        text = ''.join(pieces)
+        validate_labels(labels, text)
+
+
+def load_input(value):
+    if not value:
+        return []
+    # TXT is line based: commas and quotes are literal characters, not delimiters.
+    return [decode_text(line)[0] for line in path_for(value).read_text(
+        encoding='utf-8-sig').splitlines() if line.strip()]
 
 
 def path_for(value):
@@ -119,18 +164,26 @@ def load_database(value):
         if not path.parent.is_dir():
             raise ValueError('Database directory does not exist.')
         return pd.DataFrame(columns=COLUMNS)
-    frame = pd.read_csv(path, dtype=str, keep_default_na=False)
+    with path.open(encoding='utf-8-sig', newline='') as source:
+        rows = list(csv.reader(source, strict=True))
+    if not rows or any(len(row) != len(COLUMNS) for row in rows):
+        raise ValueError('Invalid CSV row: quote fields containing commas, quotes or line breaks.')
+    frame = pd.DataFrame(rows[1:], columns=rows[0])
     if list(frame.columns) != COLUMNS:
         raise ValueError('CSV columns must be: ' + ', '.join(COLUMNS))
-    for _, row in frame.iterrows():
+    for index, row in frame.iterrows():
         int(row['chronologic_id'])
         if row['hash_key'] != text_hash(row['text']):
             raise ValueError('CSV hash does not match its text.')
-        validate_labels(json.loads(row['labels']), row['text'])
+        labels = validate_labels(json.loads(row['labels']), row['text'])
+        text, labels = decode_text(row['text'], labels)
+        frame.at[index, 'text'] = text
+        frame.at[index, 'hash_key'] = text_hash(text)
+        frame.at[index, 'labels'] = json.dumps(labels, ensure_ascii=False)
         if str(row['edited']).lower() not in ['true', 'false']:
             raise ValueError('CSV edited values must be true or false.')
     if frame['hash_key'].duplicated().any() or frame['chronologic_id'].duplicated().any():
-        raise ValueError('CSV hashes and chronological IDs must be unique.')
+        raise ValueError('CSV hashes and chronological IDs must be unique, including after HTML entity decoding.')
     return frame
 
 
@@ -140,7 +193,7 @@ def write_database(frame):
     value = config['settings']['database_path']
     if not value:
         raise ValueError('Set a CSV database path first.')
-    atomic_write(path_for(value), frame.to_csv(index=False))
+    atomic_write(path_for(value), frame.to_csv(index=False, quoting=csv.QUOTE_ALL, lineterminator='\n'))
 
 
 def make_record(text, edited=False):
@@ -265,7 +318,7 @@ def settings():
         lines = None
         if key in ['config_path', 'input_path']:
             source = candidate['settings']['input_path']
-            lines = [line for line in path_for(source).read_text(encoding='utf-8-sig').splitlines() if line.strip()] if source else []
+            lines = load_input(source)
         write_config(candidate)
         config, database = candidate, new_db
         if lines is not None:
@@ -311,6 +364,7 @@ def update_text(index):
             text = data['text']
             if not isinstance(text, str) or not text.strip():
                 raise ValueError('Text cannot be empty.')
+            text, _ = decode_text(text)
             if text == record['text']:
                 return jsonify(ok=True)
             new_key = text_hash(text)
@@ -347,7 +401,7 @@ def initialize(config_path=None):
         status['database_path'] = ['error', str(exc)]
     try:
         source = config['settings']['input_path']
-        reload_texts([line for line in path_for(source).read_text(encoding='utf-8-sig').splitlines() if line.strip()] if source else [])
+        reload_texts(load_input(source))
     except Exception as exc:
         reload_texts([])
         status['input_path'] = ['error', str(exc)]

@@ -17,7 +17,7 @@ Open http://127.0.0.1:5000. Python 3.10 or newer is recommended.
 
 Enter a path or endpoint in the livebar and press **Enter** to apply it. Paths refer to files on the computer running Flask; relative paths start in the app folder. Input files must be UTF-8, with one text per line. Empty lines are skipped. The CSV path may name a new file in an existing directory; the file is only created on explicit save.
 
-Select text and click a colored label button. Click an annotated span to remove it. Overlapping spans are rejected. Navigate with the arrows; manual annotation changes stay in memory during navigation. Untouched predictions are discarded when leaving a text.
+Select text and click a colored label button. Click an annotated span to remove it. Overlapping spans are rejected. Navigate with the arrows; manual annotation changes stay in memory during navigation. Leading and trailing whitespace is excluded when applying a label; spaces within a span are preserved. The neutral list below the text status shows the current annotations, including unsaved changes to saved texts. Untouched predictions are discarded when leaving a text.
 
 **Right Arrow** moves to the next text, **Left Arrow** moves to the previous text, and **Enter** toggles the saved checkbox. These shortcuts pause while typing in settings fields or editing the main text. In the text editor, **Enter** applies edits and arrow keys move the cursor without navigating between texts.
 
@@ -55,7 +55,9 @@ Offsets are zero-based Unicode code-point positions with an exclusive end, match
 
 ## CSV
 
-Columns: `chronologic_id,hash_key,text,labels,edited`. Labels are JSON arrays, for example `[[8, 24, "MAIL"]]`. `edited` indicates manual changes to the text or annotations. New rows receive the current maximum chronological ID plus one; existing rows retain their ID. All CSV writes use a temporary file followed by atomic replacement.
+Columns: `chronologic_id,hash_key,text,labels,edited`. Labels are JSON arrays, for example `[[8, 24, "MAIL"]]`. `edited` indicates manual changes to the text or annotations. New rows receive the current maximum chronological ID plus one; existing rows retain their ID. CSV output quotes every field, including text and annotation arrays; commas, quotes and embedded line breaks survive database round trips. TXT input remains one text per line with literal commas and quotes. All CSV writes use a temporary file followed by atomic replacement.
+
+Semicolon-terminated HTML entities (including nested encodings) are decoded on import and text edits, before hashing and inference. Text is rendered safely as plain text. Existing CSV hashes are verified against their original text first, then text, hashes and annotation offsets are migrated together in memory and persisted on the next explicit database write. An annotation boundary inside an encoded entity or a duplicate text after decoding blocks loading rather than dropping annotations. Hashes identify the decoded UTF-8 text; ordinary whitespace is preserved.
 
 ## Tests
 
@@ -63,4 +65,4 @@ Columns: `chronologic_id,hash_key,text,labels,edited`. Labels are JSON arrays, f
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-Tests cover explicit saving, reloads, edits/removals, invalid spans, failed settings and delayed background predictions.
+Tests cover explicit saving, reloads, edits/removals, CSV punctuation and multiline round trips, HTML entity migration, invalid spans, failed settings and delayed background predictions. With Node.js installed, run `node --test tests/test_frontend.cjs` for selection trimming and live annotation status checks.
