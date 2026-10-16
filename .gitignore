@@ -4,3 +4,4 @@ __pycache__/
 .DS_Store
 annotations.csv
 sample_data.txt
+annotations.jsonl

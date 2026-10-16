@@ -10,7 +10,7 @@
 <body>
 <main>
   <header class="livebar" aria-label="Files and inference settings">
-    {% for key, title, icon, placeholder in [('config_path', 'General config JSON', 'general_config', '/path/to/config.json'), ('input_path', 'Input TXT file', 'input_txt-file', '/path/to/texts.txt'), ('database_path', 'CSV database', 'csv-database', '/path/to/annotations.csv'), ('inference_url', 'Inference endpoint', 'inference_endpoint', 'http://localhost:8080/predict')] %}
+    {% for key, title, icon, placeholder in [('config_path', 'General config JSON', 'general_config', '/path/to/config.json'), ('input_path', 'Input TXT file', 'input_txt-file', '/path/to/texts.txt'), ('database_path', 'JSONL database', 'csv-database', '/path/to/annotations.jsonl'), ('inference_url', 'Inference endpoint', 'inference_endpoint', 'http://localhost:8080/predict')] %}
     <form class="live-item" data-key="{{ key }}">
       <div class="live-icon"><img src="/icons/{{ icon }}.png" alt="{{ title }}"><img class="status" src="/icons/not-connected.png" alt="Not configured"></div>
       <label class="sr-only" for="{{ key }}">{{ title }}</label>

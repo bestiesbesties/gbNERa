@@ -1,6 +1,6 @@
 # gbNERa
 
-A small, single-user NER labeling app using Flask, pandas, HTML, CSS and vanilla JavaScript. No Node.js or frontend build step.
+A small, single-user NER labeling app using Flask, HTML, CSS and vanilla JavaScript. No Node.js or frontend build step.
 
 ## Run
 
@@ -15,17 +15,17 @@ Open http://127.0.0.1:5000. Python 3.10 or newer is recommended.
 
 ## Use
 
-Enter a path or endpoint in the livebar and press **Enter** to apply it. Paths refer to files on the computer running Flask; relative paths start in the app folder. Input files must be UTF-8, with one text per line. Empty lines are skipped. The CSV path may name a new file in an existing directory; the file is only created on explicit save.
+Enter a path or endpoint in the livebar and press **Enter** to apply it. Paths refer to files on the computer running Flask; relative paths start in the app folder. Input files must be UTF-8, with one text per line. Empty lines are skipped. The JSONL path may name a new file in an existing directory; the file is only created on explicit save.
 
 Select text and click a colored label button. Click an annotated span to remove it. Overlapping spans are rejected. Navigate with the arrows; manual annotation changes stay in memory during navigation. Leading and trailing whitespace is excluded when applying a label; spaces within a span are preserved. The neutral list below the text status shows the current annotations, including unsaved changes to saved texts. Untouched predictions are discarded when leaving a text.
 
 **Right Arrow** moves to the next text, **Left Arrow** moves to the previous text, and **Enter** toggles the saved checkbox. These shortcuts pause while typing in settings fields or editing the main text. In the text editor, **Enter** applies edits and arrow keys move the cursor without navigating between texts.
 
-The checkbox shows whether a text is in the CSV. Checking it saves the text and its current labels; unchecking it removes the row. Changes to an already saved text's annotations stay in memory until you click **Save changes**. Predictions never save automatically.
+The checkbox shows whether a text is in the JSONL. Checking it saves the text and its current labels; unchecking it removes the row. Changes to an already saved text's annotations stay in memory until you click **Save changes**. Predictions never save automatically.
 
 The edit icon opens a text field. **Enter** applies the edit; **Escape** cancels it. Applying an edit removes the old saved row, clears all annotations and changes the SHA-256 hash. The changed text remains unsaved. The source TXT is not rewritten. Identical input lines share annotations and editing one updates all identical occurrences in the current session. Editing into another existing text is rejected to avoid replacing its annotations.
 
-Reloading the input, switching the database/config or restarting the server discards unsaved work. A browser refresh keeps server memory. This is a local, single-user app; open tabs share the same session. Avoid editing the CSV externally while the server is running.
+Reloading the input, switching the database/config or restarting the server discards unsaved work. A browser refresh keeps server memory. This is a local, single-user app; open tabs share the same session. Avoid editing the JSONL externally while the server is running.
 
 ## Configuration
 
@@ -35,7 +35,7 @@ Reloading the input, switching the database/config or restarting the server disc
 NER_CONFIG=/path/to/config.json python app.py
 ```
 
-When using another config, use that same startup command on subsequent launches. The green indicator means loaded/ready; for a new CSV it means ready to create on save. The endpoint turns green only after successful predictions, and is gray before any requests.
+When using another config, use that same startup command on subsequent launches. The green indicator means loaded/ready; for a new JSONL it means ready to create on save. The endpoint turns green only after successful predictions, and is gray before any requests.
 
 ## Inference
 
@@ -53,11 +53,21 @@ Expected response:
 
 Offsets are zero-based Unicode code-point positions with an exclusive end, matching Python slicing, including emoji. Unknown inference labels are ignored. Names match case-sensitively against each label’s `short_name` and `aliases`; for example, `"short_name": "NAME", "aliases": ["PER"]` maps `PER` predictions to `NAME`. Aliases cannot belong to multiple labels. Overlapping recognized predictions and invalid offsets are rejected. The active text shows the error; navigate away and back, or reapply the endpoint, to retry. The browser polls state only while a prediction is running and refreshes after user actions. Late responses never replace manually changed or saved labels.
 
-## CSV
+## JSONL
 
-Columns: `chronologic_id,hash_key,text,labels,edited`. Labels are JSON arrays, for example `[[8, 24, "MAIL"]]`. `edited` indicates manual changes to the text or annotations. New rows receive the current maximum chronological ID plus one; existing rows retain their ID. CSV output quotes every field, including text and annotation arrays; commas, quotes and embedded line breaks survive database round trips. TXT input remains one text per line with literal commas and quotes. All CSV writes use a temporary file followed by atomic replacement.
+Each line is a JSON object with fields: `chronologic_id`, `hash_key`, `text`, `labels`, and `edited`. Labels are native JSON arrays, for example `[[8, 24, "MAIL"]]`; `edited` is a boolean. Commas, quotes, Unicode and embedded line breaks are escaped automatically and survive round trips. Empty databases are empty files. Errors report the offending line, and invalid databases cannot be overwritten by saving.
 
-Semicolon-terminated HTML entities (including nested encodings) are decoded on import and text edits, before hashing and inference. Text is rendered safely as plain text. Existing CSV hashes are verified against their original text first, then text, hashes and annotation offsets are migrated together in memory and persisted on the next explicit database write. An annotation boundary inside an encoded entity or a duplicate text after decoding blocks loading rather than dropping annotations. Hashes identify the decoded UTF-8 text; ordinary whitespace is preserved.
+The single `text` field contains the exact input text. No HTML entity decoding, HTML rendering, or text normalization is performed: `&amp;` stays `&amp;`. Display, editing, inference, SHA-256 hashing and annotation offsets all use this same text. TXT line separators and an initial UTF-8 BOM are excluded; whitespace within each source line is preserved. Blank input lines are skipped. The input TXT is never rewritten.
+
+Text is displayed safely as plain text. On load, hashes, annotation offsets and uniqueness are validated. Records are held in a dictionary keyed by hash for efficient lookups. New records receive the current maximum chronological ID plus one; existing records retain their ID. Writes atomically replace the complete file using a temporary file.
+
+### Migrating an existing CSV
+
+```sh
+python migrate_csv.py annotations.csv annotations.jsonl
+```
+
+Then set the database path to the new JSONL file. Migration leaves the CSV untouched and refuses to overwrite a destination. It validates hashes and preserves stored text and annotation offsets exactly. Any text transformations already applied by older versions cannot be undone from a CSV alone. Malformed CSV quoting must be repaired before migration.
 
 ## Tests
 
@@ -65,4 +75,4 @@ Semicolon-terminated HTML entities (including nested encodings) are decoded on i
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-Tests cover explicit saving, reloads, edits/removals, CSV punctuation and multiline round trips, HTML entity migration, invalid spans, failed settings and delayed background predictions. With Node.js installed, run `node --test tests/test_frontend.cjs` for selection trimming and live annotation status checks.
+Tests cover explicit saving, reloads, edits/removals, JSONL punctuation and multiline round trips, source-text hashing and CSV migration, invalid spans, failed settings and delayed background predictions. With Node.js installed, run `node --test tests/test_frontend.cjs` for selection trimming and live annotation status checks.

@@ -14,9 +14,9 @@ class EditorTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.source = self.root / 'input.txt'
         self.source.write_text('😀 Contact john@example.com\nSecond text\n', encoding='utf-8')
-        self.csv = self.root / 'db.csv'
+        self.db = self.root / 'db.jsonl'
         self.config = self.root / 'config.json'
-        self.config.write_text(json.dumps({'labels': [{'id': 1, 'short_name': 'MAIL', 'color': '#00cc77'}], 'settings': {'input_path': str(self.source), 'database_path': str(self.csv), 'inference_url': ''}}))
+        self.config.write_text(json.dumps({'labels': [{'id': 1, 'short_name': 'MAIL', 'color': '#00cc77'}], 'settings': {'input_path': str(self.source), 'database_path': str(self.db), 'inference_url': ''}}))
         editor.initialize(str(self.config))
         self.client = editor.app.test_client()
 
@@ -46,82 +46,132 @@ class EditorTests(unittest.TestCase):
         self.fail('Prediction did not finish')
 
     def test_explicit_save_edit_and_reload(self):
-        self.assertFalse(self.csv.exists())
+        self.assertFalse(self.db.exists())
         self.assertEqual(self.change('labels', labels=[[10, 26, 'MAIL']]).status_code, 200)
-        self.assertFalse(self.csv.exists())
+        self.assertFalse(self.db.exists())
         self.change('save')
         editor.initialize(str(self.config))
         self.assertTrue(self.record()['saved'])
         self.assertEqual(self.record()['labels'], [[10, 26, 'MAIL']])
         self.change('labels', labels=[])
-        self.assertEqual(json.loads(editor.load_database(str(self.csv)).iloc[0]['labels']), [[10, 26, 'MAIL']])
+        self.assertEqual(next(iter(editor.load_database(str(self.db)).values()))['labels'], [[10, 26, 'MAIL']])
         old_hash = self.record()['hash_key']
         self.change('edit', text='A changed sentence')
         self.assertNotEqual(self.record()['hash_key'], old_hash)
         self.assertFalse(self.record()['saved'])
         self.assertEqual(self.record()['labels'], [])
-        self.assertTrue(editor.load_database(str(self.csv)).empty)
+        self.assertTrue(not editor.load_database(str(self.db)))
         self.change('save')
         self.assertTrue(self.record()['edited'])
         self.change('remove')
-        self.assertTrue(editor.load_database(str(self.csv)).empty)
+        self.assertTrue(not editor.load_database(str(self.db)))
 
-    def test_csv_round_trip_punctuation_and_multiline(self):
+    def test_jsonl_round_trip_punctuation_and_multiline(self):
         text = '😀 Hello, "Jane", john@example.com\n• Second line, more text\r\nLast line'
         self.assertEqual(self.change('edit', text=text).status_code, 200)
         start = text.index('john@')
         labels = [[start, start + len('john@example.com'), 'MAIL']]
         self.change('labels', labels=labels)
         self.assertEqual(self.change('save').status_code, 200)
-        frame = editor.load_database(str(self.csv))
-        self.assertEqual(frame.iloc[0]['text'], text)
-        self.assertEqual(json.loads(frame.iloc[0]['labels']), labels)
-        self.assertEqual(frame.iloc[0]['hash_key'], editor.text_hash(text))
+        row = next(iter(editor.load_database(str(self.db)).values()))
+        self.assertEqual(row['text'], text)
+        self.assertEqual(row['labels'], labels)
+        self.assertEqual(row['hash_key'], editor.text_hash(text))
 
     def test_txt_commas_quotes_and_entities(self):
         self.source.write_text('Hello, "Jane", &bull; &amp; &#x1F600;\n', encoding='utf-8')
         editor.initialize(str(self.config))
-        self.assertEqual(self.record()['text'], 'Hello, "Jane", • & 😀')
-        self.assertEqual(self.record()['hash_key'], editor.text_hash(self.record()['text']))
+        self.assertEqual(self.record()['text'], 'Hello, "Jane", &bull; &amp; &#x1F600;')
+        self.assertEqual(self.record()['hash_key'], editor.text_hash('Hello, "Jane", &bull; &amp; &#x1F600;'))
 
-    def test_legacy_entity_spans_are_migrated_and_stable(self):
+    def test_literal_text_and_offsets_survive_reload(self):
         raw = '&amp;bull; Contact john@example.com &amp; team'
-        start = raw.index('john@')
-        frame = editor.pd.DataFrame([[1, editor.text_hash(raw), raw,
-            json.dumps([[start, start + 16, 'MAIL']]), True]], columns=editor.COLUMNS)
-        self.csv.write_text(frame.to_csv(index=False), encoding='utf-8')
         self.source.write_text(raw + '\n', encoding='utf-8')
         editor.initialize(str(self.config))
-        self.assertTrue(self.record()['saved'])
-        self.assertEqual(self.record()['text'], '• Contact john@example.com & team')
-        self.assertEqual(self.record()['labels'], [[10, 26, 'MAIL']])
+        self.assertEqual(self.record()['text'], raw)
+        labels = [[raw.index('john@'), raw.index('john@') + 16, 'MAIL']]
+        self.assertEqual(self.record()['hash_key'], editor.text_hash(raw))
+        self.change('labels', labels=labels)
         self.assertEqual(self.change('save').status_code, 200)
+        stored = json.loads(self.db.read_text())
+        self.assertEqual(stored['text'], raw)
+        self.assertNotIn('source_text', stored)
+        self.assertEqual(stored['labels'], labels)
         editor.initialize(str(self.config))
-        self.assertEqual(self.record()['labels'], [[10, 26, 'MAIL']])
+        self.assertEqual(self.record()['labels'], labels)
+        self.assertTrue(self.record()['saved'])
+        response = self.client.post('/api/settings', json={
+            'key': 'database_path', 'value': str(self.db)})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.record()['hash_key'], editor.text_hash(raw))
         self.assertTrue(self.record()['saved'])
 
-    def test_entity_boundary_and_collision_rejected(self):
-        with self.assertRaisesRegex(ValueError, 'inside an HTML entity'):
-            editor.decode_text('&bull; hello', [[1, 4, 'MAIL']])
-        rows = [[index, editor.text_hash(text), text, '[]', False]
-                for index, text in enumerate(['&bull; hello', '• hello'])]
-        self.csv.write_text(editor.pd.DataFrame(rows, columns=editor.COLUMNS).to_csv(index=False))
+    def test_entities_remain_literal_on_import_and_edit(self):
+        self.source.write_text('&bull; hello\n• hello\n', encoding='utf-8')
         editor.initialize(str(self.config))
-        self.assertEqual(editor.status['database_path'][0], 'error')
-        original = self.csv.read_bytes()
-        self.assertEqual(self.change('save').status_code, 400)
-        self.assertEqual(self.csv.read_bytes(), original)
+        self.assertEqual(len(editor.records), 2)
+        self.change('save')
+        second = self.client.get('/api/state').json['texts'][1]
+        self.assertFalse(second['saved'])
+        self.assertNotEqual(second['hash_key'], self.record()['hash_key'])
+        self.assertNotEqual(second['text'], self.record()['text'])
+        self.assertEqual(self.change('edit', text='&#8226; hello').status_code, 200)
+        self.assertEqual(self.record()['hash_key'], editor.text_hash('&#8226; hello'))
+        self.assertEqual(self.record()['text'], '&#8226; hello')
+        self.assertFalse(self.record()['saved'])
+        self.assertFalse(editor.load_database(str(self.db)))
 
-    def test_malformed_comma_csv_is_not_silently_shifted(self):
-        self.csv.write_text(','.join(editor.COLUMNS) + '\n1,hash,Hello, Jane,[],False\n')
-        with self.assertRaisesRegex(ValueError, 'Invalid CSV row'):
-            editor.load_database(str(self.csv))
+    def test_jsonl_validation(self):
+        self.change('save')
+        original = json.loads(self.db.read_text())
+        variants = [
+            {**original, 'hash_key': 'wrong'},
+            {**original, 'edited': 'false'},
+            {**original, 'chronologic_id': True},
+            {**original, 'text': 'wrong'},
+            {**original, 'labels': [[0, 999, 'MAIL']]},
+            {**original, 'text': None},
+        ]
+        for row in variants:
+            with self.subTest(row=row):
+                self.db.write_text(json.dumps(row) + '\n')
+                with self.assertRaisesRegex(ValueError, 'Invalid JSONL line 1'):
+                    editor.load_database(str(self.db))
+        self.db.write_text((json.dumps(original) + '\n') * 2)
+        with self.assertRaisesRegex(ValueError, 'line 2.*unique'):
+            editor.load_database(str(self.db))
+        self.db.write_text(json.dumps(original) + '\n{broken')
+        with self.assertRaisesRegex(ValueError, 'Invalid JSONL line 2'):
+            editor.load_database(str(self.db))
+
+    def test_csv_migration_preserves_literal_text(self):
+        import csv
+        from migrate_csv import migrate
+        raw = '&bull; Contact john@example.com'
+        self.source.write_text(raw + '\n')
+        legacy = self.root / 'legacy.csv'
+        text = raw
+        labels = [[raw.index('john@'), raw.index('john@') + 16, 'MAIL']]
+        with legacy.open('w', newline='') as stream:
+            writer = csv.writer(stream)
+            writer.writerow(['chronologic_id', 'hash_key', 'text', 'labels', 'edited'])
+            writer.writerow([1, editor.text_hash(text), text,
+                             json.dumps(labels), True])
+        original = legacy.read_bytes()
+        self.assertEqual(migrate(legacy, self.db), 1)
+        self.assertEqual(legacy.read_bytes(), original)
+        editor.initialize(str(self.config))
+        self.assertTrue(self.record()['saved'])
+        self.assertEqual(self.record()['hash_key'], editor.text_hash(raw))
+        self.assertEqual(self.record()['labels'], labels)
+        with self.assertRaisesRegex(ValueError, 'already exists'):
+            migrate(legacy, self.db)
 
     def test_invalid_database_is_not_overwritten(self):
-        self.csv.write_text('invalid,csv\n1,2\n')
+        self.db.write_text('invalid,csv\n1,2\n')
         editor.initialize(str(self.config))
         self.assertEqual(self.change('save').status_code, 400)
-        self.assertEqual(self.csv.read_text(), 'invalid,csv\n1,2\n')
+        self.assertEqual(self.db.read_text(), 'invalid,csv\n1,2\n')
 
     def test_page_and_assets(self):
         self.assertEqual(self.client.get('/').status_code, 200)
@@ -167,7 +217,7 @@ class EditorTests(unittest.TestCase):
                 time.sleep(.01)
         self.assertEqual(self.record()['labels'], [[2, 9, 'MAIL']])
         self.assertEqual(editor.records[editor.texts[1]]['prediction'], 'idle')
-        self.assertFalse(self.csv.exists())
+        self.assertFalse(self.db.exists())
 
     def test_saved_text_skips_inference(self):
         self.change('save')
@@ -211,7 +261,7 @@ class EditorTests(unittest.TestCase):
             self.wait_prediction()
             self.assertEqual(len(called), 3)
             self.assertEqual(editor.records[editor.texts[1]]['labels'], [])
-        self.assertFalse(self.csv.exists())
+        self.assertFalse(self.db.exists())
 
     def test_late_response_after_navigation_is_ignored(self):
         started, release = threading.Event(), threading.Event()

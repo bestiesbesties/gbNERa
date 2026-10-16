@@ -51,3 +51,10 @@ test('saved annotation list tracks edits and save status', () => {
   vm.runInContext('record.dirty = false; render();', context);
   assert.equal(element('text-status').textContent, 'Saved in database');
 });
+
+test('text editor preserves literal HTML entities', () => {
+  const {context, element} = setup({text: '&amp; Jane', labels: []});
+  element('edit-text').focus = () => {};
+  element('edit').onclick();
+  assert.equal(element('edit-text').value, '&amp; Jane');
+});

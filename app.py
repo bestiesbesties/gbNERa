@@ -1,8 +1,5 @@
 """A small, single-user NER editor. Run with: python app.py."""
-import csv
 import hashlib
-import html
-import re
 import json
 import os
 from pathlib import Path
@@ -10,17 +7,16 @@ import threading
 import urllib.request
 from urllib.parse import urlparse
 
-import pandas as pd
 from flask import Flask, jsonify, render_template, request, send_from_directory
 
 ROOT = Path(__file__).resolve().parent
-COLUMNS = ['chronologic_id', 'hash_key', 'text', 'labels', 'edited']
+FIELDS = {'chronologic_id', 'hash_key', 'text', 'labels', 'edited'}
 app = Flask(__name__)
 lock = threading.RLock()
 config = {}
 records = {}
 texts = []
-database = pd.DataFrame(columns=COLUMNS)
+database = {}
 status = {}
 generation = 0
 revision = 0
@@ -31,45 +27,11 @@ def text_hash(text):
     return hashlib.sha256(text.encode('utf-8')).hexdigest()
 
 
-# Require a semicolon so ordinary text such as "AT&T" stays untouched.
-ENTITY = re.compile(r'&(?:#[0-9]+|#[xX][0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]+);')
-
-
-def decode_text(text, labels=None):
-    """Canonicalize entities and translate saved Unicode span boundaries."""
-    labels = [list(item) for item in (labels or [])]
-    while True:
-        pieces, boundaries, cursor, size = [], {0: 0}, 0, 0
-        for match in ENTITY.finditer(text):
-            replacement = html.unescape(match.group())
-            if replacement == match.group():
-                continue
-            for index in range(cursor, match.start() + 1):
-                boundaries[index] = size + index - cursor
-            pieces.append(text[cursor:match.start()])
-            size += match.start() - cursor
-            pieces.append(replacement)
-            size += len(replacement)
-            cursor = match.end()
-            boundaries[cursor] = size
-        if cursor == 0:
-            return text, labels
-        for index in range(cursor, len(text) + 1):
-            boundaries[index] = size + index - cursor
-        pieces.append(text[cursor:])
-        for item in labels:
-            if item[0] not in boundaries or item[1] not in boundaries:
-                raise ValueError('A saved annotation ends inside an HTML entity; correct its boundaries before importing.')
-            item[0], item[1] = boundaries[item[0]], boundaries[item[1]]
-        text = ''.join(pieces)
-        validate_labels(labels, text)
-
-
 def load_input(value):
     if not value:
         return []
     # TXT is line based: commas and quotes are literal characters, not delimiters.
-    return [decode_text(line)[0] for line in path_for(value).read_text(
+    return [line for line in path_for(value).read_text(
         encoding='utf-8-sig').splitlines() if line.strip()]
 
 
@@ -157,53 +119,58 @@ def atomic_write(path, content):
 
 
 def load_database(value):
+    rows, ids = {}, set()
     if not value:
-        return pd.DataFrame(columns=COLUMNS)
+        return rows
     path = path_for(value)
     if not path.exists():
         if not path.parent.is_dir():
             raise ValueError('Database directory does not exist.')
-        return pd.DataFrame(columns=COLUMNS)
-    with path.open(encoding='utf-8-sig', newline='') as source:
-        rows = list(csv.reader(source, strict=True))
-    if not rows or any(len(row) != len(COLUMNS) for row in rows):
-        raise ValueError('Invalid CSV row: quote fields containing commas, quotes or line breaks.')
-    frame = pd.DataFrame(rows[1:], columns=rows[0])
-    if list(frame.columns) != COLUMNS:
-        raise ValueError('CSV columns must be: ' + ', '.join(COLUMNS))
-    for index, row in frame.iterrows():
-        int(row['chronologic_id'])
-        if row['hash_key'] != text_hash(row['text']):
-            raise ValueError('CSV hash does not match its text.')
-        labels = validate_labels(json.loads(row['labels']), row['text'])
-        text, labels = decode_text(row['text'], labels)
-        frame.at[index, 'text'] = text
-        frame.at[index, 'hash_key'] = text_hash(text)
-        frame.at[index, 'labels'] = json.dumps(labels, ensure_ascii=False)
-        if str(row['edited']).lower() not in ['true', 'false']:
-            raise ValueError('CSV edited values must be true or false.')
-    if frame['hash_key'].duplicated().any() or frame['chronologic_id'].duplicated().any():
-        raise ValueError('CSV hashes and chronological IDs must be unique, including after HTML entity decoding.')
-    return frame
+        return rows
+    with path.open(encoding='utf-8-sig') as source:
+        for number, line in enumerate(source, 1):
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+                if not isinstance(row, dict) or set(row) != FIELDS:
+                    raise ValueError('Expected fields: ' + ', '.join(sorted(FIELDS)))
+                if type(row['chronologic_id']) is not int or row['chronologic_id'] < 1:
+                    raise ValueError('chronologic_id must be a positive integer.')
+                if not isinstance(row['text'], str):
+                    raise ValueError('text must be a string.')
+                if row['hash_key'] != text_hash(row['text']):
+                    raise ValueError('Hash does not match text.')
+                row['labels'] = validate_labels(row['labels'], row['text'])
+                if type(row['edited']) is not bool:
+                    raise ValueError('edited must be a boolean.')
+                if row['hash_key'] in rows or row['chronologic_id'] in ids:
+                    raise ValueError('Hashes and chronological IDs must be unique.')
+                rows[row['hash_key']] = row
+                ids.add(row['chronologic_id'])
+            except (ValueError, TypeError) as exc:
+                raise ValueError(f'Invalid JSONL line {number}: {exc}') from exc
+    return rows
 
 
-def write_database(frame):
+def write_database(rows):
     if status.get('database_path', ['off'])[0] == 'error':
         raise ValueError('Fix the database path before saving; the existing file could not be loaded.')
     value = config['settings']['database_path']
     if not value:
-        raise ValueError('Set a CSV database path first.')
-    atomic_write(path_for(value), frame.to_csv(index=False, quoting=csv.QUOTE_ALL, lineterminator='\n'))
+        raise ValueError('Set a JSONL database path first.')
+    atomic_write(path_for(value), ''.join(
+        json.dumps(row, ensure_ascii=False) + '\n' for row in rows.values()))
 
 
 def make_record(text, edited=False):
     key = text_hash(text)
-    rows = database[database.hash_key == key]
-    saved = not rows.empty
+    row = database.get(key)
+    saved = row is not None
     return dict(text=text, hash_key=key,
-                labels=json.loads(rows.iloc[0]['labels']) if saved else [],
+                labels=[list(label) for label in row['labels']] if saved else [],
                 saved=saved, dirty=False,
-                edited=(str(rows.iloc[0]['edited']).lower() == 'true') if saved else edited,
+                edited=row['edited'] if saved else edited,
                 prediction='saved' if saved else 'idle', touched=False)
 
 
@@ -347,33 +314,35 @@ def update_text(index):
             record['labels'] = validate_labels(data['labels'], record['text'], {label['short_name'] for label in config['labels']})
             record.update(touched=True, dirty=True, edited=True, prediction='manual')
         elif action == 'save':
-            frame = database[database.hash_key != key].copy()
-            old = database[database.hash_key == key]
-            ident = int(old.iloc[0].chronologic_id) if not old.empty else (max([int(n) for n in database.chronologic_id], default=0) + 1)
-            row = [ident, key, record['text'], json.dumps(record['labels']), record['edited']]
-            frame = pd.concat([frame, pd.DataFrame([row], columns=COLUMNS)], ignore_index=True)
-            write_database(frame)
-            database = frame
+            rows = database.copy()
+            old = database.get(key)
+            ident = old['chronologic_id'] if old else max(
+                (row['chronologic_id'] for row in database.values()), default=0) + 1
+            rows[key] = dict(chronologic_id=ident, hash_key=key,
+                             text=record['text'],
+                             labels=[list(label) for label in record['labels']],
+                             edited=record['edited'])
+            write_database(rows)
+            database = rows
             record.update(saved=True, dirty=False, touched=True)
         elif action == 'remove':
-            frame = database[database.hash_key != key].copy()
-            write_database(frame)
-            database = frame
+            rows = {k: row for k, row in database.items() if k != key}
+            write_database(rows)
+            database = rows
             record.update(saved=False, touched=True, dirty=False)
         elif action == 'edit':
             text = data['text']
             if not isinstance(text, str) or not text.strip():
                 raise ValueError('Text cannot be empty.')
-            text, _ = decode_text(text)
             if text == record['text']:
                 return jsonify(ok=True)
             new_key = text_hash(text)
-            if new_key in records or new_key in database.hash_key.values:
+            if new_key in records or new_key in database:
                 raise ValueError('That text already exists. Choose a different text to avoid replacing its annotations.')
             if record['saved']:
-                frame = database[database.hash_key != key].copy()
-                write_database(frame)
-                database = frame
+                rows = {k: row for k, row in database.items() if k != key}
+                write_database(rows)
+                database = rows
             # Identical source lines share the same record and are edited together.
             texts[:] = [new_key if item == key else item for item in texts]
             del records[key]
@@ -397,7 +366,7 @@ def initialize(config_path=None):
     try:
         database = load_database(config['settings']['database_path'])
     except Exception as exc:
-        database = pd.DataFrame(columns=COLUMNS)
+        database = {}
         status['database_path'] = ['error', str(exc)]
     try:
         source = config['settings']['input_path']
