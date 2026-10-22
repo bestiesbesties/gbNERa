@@ -5,15 +5,23 @@ const test = require('node:test');
 
 function setup(record) {
   const elements = new Map();
+  const node = () => ({
+    textContent: '', children: [], dataset: {}, handlers: {},
+    classList: {toggle() {}}, style: {setProperty() {}}, setAttribute() {},
+    addEventListener(event, handler) { this.handlers[event] = handler; },
+    querySelector() { return {}; },
+    append(...items) { this.children.push(...items); },
+    prepend(item) { this.children.unshift(item); },
+    replaceChildren(...items) { this.children = items; },
+  });
   const element = id => {
-    if (!elements.has(id)) elements.set(id, {
-      textContent: '', classList: {toggle() {}}, setAttribute() {},
-      addEventListener() {}, querySelector() { return {}; },
-    });
+    if (!elements.has(id)) elements.set(id, node());
     return elements.get(id);
   };
   const context = vm.createContext({
-    document: {getElementById: element, querySelectorAll: () => [], addEventListener() {}},
+    document: {getElementById: element, querySelectorAll: () => [], addEventListener() {},
+      createElement: node, createTextNode: text => ({textContent: text})},
+    window: {getSelection: () => ({isCollapsed: true})},
   });
   const source = fs.readFileSync(require.resolve('../static/app.js'), 'utf8');
   vm.runInContext(source.replace(/poll\(\);\s*$/, ''), context);
@@ -57,4 +65,28 @@ test('text editor preserves literal HTML entities', () => {
   element('edit-text').focus = () => {};
   element('edit').onclick();
   assert.equal(element('edit-text').value, '&amp; Jane');
+});
+
+test('adjacent identical labels render individually and remove independently', () => {
+  const labels = [[0, 4, 'NAME'], [4, 9, 'NAME'], [9, 14, 'NAME'], [15, 20, 'NAME']];
+  const {context, element} = setup({text: 'AnnaBellaClara Diana', labels});
+  vm.runInContext("rendered = ''; render();", context);
+  const spans = element('text').children.filter(child => child.className === 'annotation');
+  assert.deepEqual(spans.map(span => span.textContent), ['Anna', 'Bella', 'Clara', 'Diana']);
+  assert.equal(spans.length, labels.length);
+  for (const span of spans) {
+    assert.equal(span.dataset.label, 'NAME');
+    assert.equal(span.children[0].dataset.label, 'NAME');
+  }
+  spans[1].handlers.click();
+  assert.deepEqual(JSON.parse(JSON.stringify(context.change)), {
+    action: 'labels', data: {labels: [labels[0], labels[2], labels[3]]},
+  });
+});
+
+test('applying the same label next to another span keeps both offsets', () => {
+  const {context} = setup({text: 'AnnaBella', labels: [[0, 4, 'NAME']]});
+  vm.runInContext('selection = [4, 9]; applyLabel("NAME");', context);
+  assert.deepEqual(JSON.parse(JSON.stringify(context.change.data.labels)),
+    [[0, 4, 'NAME'], [4, 9, 'NAME']]);
 });

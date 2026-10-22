@@ -55,19 +55,11 @@ Offsets are zero-based Unicode code-point positions with an exclusive end, match
 
 ## JSONL
 
-Each line is a JSON object with fields: `chronologic_id`, `hash_key`, `text`, `labels`, and `edited`. Labels are native JSON arrays, for example `[[8, 24, "MAIL"]]`; `edited` is a boolean. Commas, quotes, Unicode and embedded line breaks are escaped automatically and survive round trips. Empty databases are empty files. Errors report the offending line, and invalid databases cannot be overwritten by saving.
+Each line is a JSON object with fields: `hash_key`, `text`, `labels`, and `edited`. Adjacent annotations remain separate entries even when their label names match; the editor gives each its own underline and badge. Labels are native JSON arrays, for example `[[8, 24, "MAIL"]]`; `edited` is a boolean. Commas, quotes, Unicode and embedded line breaks are escaped automatically and survive round trips. Empty databases are empty files. Errors report the offending line, and invalid databases cannot be overwritten by saving.
 
 The single `text` field contains the exact input text. No HTML entity decoding, HTML rendering, or text normalization is performed: `&amp;` stays `&amp;`. Display, editing, inference, SHA-256 hashing and annotation offsets all use this same text. TXT line separators and an initial UTF-8 BOM are excluded; whitespace within each source line is preserved. Blank input lines are skipped. The input TXT is never rewritten.
 
-Text is displayed safely as plain text. On load, hashes, annotation offsets and uniqueness are validated. Records are held in a dictionary keyed by hash for efficient lookups. New records receive the current maximum chronological ID plus one; existing records retain their ID. Writes atomically replace the complete file using a temporary file.
-
-### Migrating an existing CSV
-
-```sh
-python migrate_csv.py annotations.csv annotations.jsonl
-```
-
-Then set the database path to the new JSONL file. Migration leaves the CSV untouched and refuses to overwrite a destination. It validates hashes and preserves stored text and annotation offsets exactly. Any text transformations already applied by older versions cannot be undone from a CSV alone. Malformed CSV quoting must be repaired before migration.
+Text is displayed safely as plain text. On load, hashes, annotation offsets and uniqueness are validated. Records are held in a dictionary keyed by hash for efficient lookups. Writes atomically replace the complete file using a temporary file.
 
 ## Tests
 
@@ -75,4 +67,4 @@ Then set the database path to the new JSONL file. Migration leaves the CSV untou
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-Tests cover explicit saving, reloads, edits/removals, JSONL punctuation and multiline round trips, source-text hashing and CSV migration, invalid spans, failed settings and delayed background predictions. With Node.js installed, run `node --test tests/test_frontend.cjs` for selection trimming and live annotation status checks.
+Tests cover explicit saving, reloads, edits/removals, JSONL punctuation and multiline round trips, source-text hashing and adjacent identical labels, invalid spans, failed settings and delayed background predictions. With Node.js installed, run `node --test tests/test_frontend.cjs` for selection trimming, individual span rendering/removal, and live annotation status checks.

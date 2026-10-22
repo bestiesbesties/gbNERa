@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 from flask import Flask, jsonify, render_template, request, send_from_directory
 
 ROOT = Path(__file__).resolve().parent
-FIELDS = {'chronologic_id', 'hash_key', 'text', 'labels', 'edited'}
+FIELDS = {'hash_key', 'text', 'labels', 'edited'}
 app = Flask(__name__)
 lock = threading.RLock()
 config = {}
@@ -119,7 +119,7 @@ def atomic_write(path, content):
 
 
 def load_database(value):
-    rows, ids = {}, set()
+    rows = {}
     if not value:
         return rows
     path = path_for(value)
@@ -135,8 +135,6 @@ def load_database(value):
                 row = json.loads(line)
                 if not isinstance(row, dict) or set(row) != FIELDS:
                     raise ValueError('Expected fields: ' + ', '.join(sorted(FIELDS)))
-                if type(row['chronologic_id']) is not int or row['chronologic_id'] < 1:
-                    raise ValueError('chronologic_id must be a positive integer.')
                 if not isinstance(row['text'], str):
                     raise ValueError('text must be a string.')
                 if row['hash_key'] != text_hash(row['text']):
@@ -144,10 +142,9 @@ def load_database(value):
                 row['labels'] = validate_labels(row['labels'], row['text'])
                 if type(row['edited']) is not bool:
                     raise ValueError('edited must be a boolean.')
-                if row['hash_key'] in rows or row['chronologic_id'] in ids:
-                    raise ValueError('Hashes and chronological IDs must be unique.')
+                if row['hash_key'] in rows:
+                    raise ValueError('Hashes must be unique.')
                 rows[row['hash_key']] = row
-                ids.add(row['chronologic_id'])
             except (ValueError, TypeError) as exc:
                 raise ValueError(f'Invalid JSONL line {number}: {exc}') from exc
     return rows
@@ -315,10 +312,7 @@ def update_text(index):
             record.update(touched=True, dirty=True, edited=True, prediction='manual')
         elif action == 'save':
             rows = database.copy()
-            old = database.get(key)
-            ident = old['chronologic_id'] if old else max(
-                (row['chronologic_id'] for row in database.values()), default=0) + 1
-            rows[key] = dict(chronologic_id=ident, hash_key=key,
+            rows[key] = dict(hash_key=key,
                              text=record['text'],
                              labels=[list(label) for label in record['labels']],
                              edited=record['edited'])

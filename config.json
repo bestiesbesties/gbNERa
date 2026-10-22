@@ -28,9 +28,9 @@
     }
   ],
   "settings": {
-    "config_path": "/Users/leyton/Documents/python/gbNERa/config.json",
-    "input_path": "/Users/leyton/Documents/python/gbNERa/sample_data.txt",
-    "database_path": "annotations.jsonl",
+    "config_path": "config.json",
+    "input_path": "sample_data.txt",
+    "database_path": "annotations2.jsonl",
     "inference_url": "http://127.0.0.1:8081/inference"
   }
 }

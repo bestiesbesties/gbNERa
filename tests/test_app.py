@@ -127,7 +127,7 @@ class EditorTests(unittest.TestCase):
         variants = [
             {**original, 'hash_key': 'wrong'},
             {**original, 'edited': 'false'},
-            {**original, 'chronologic_id': True},
+            {**original, 'unexpected_field': True},
             {**original, 'text': 'wrong'},
             {**original, 'labels': [[0, 999, 'MAIL']]},
             {**original, 'text': None},
@@ -144,28 +144,22 @@ class EditorTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Invalid JSONL line 2'):
             editor.load_database(str(self.db))
 
-    def test_csv_migration_preserves_literal_text(self):
-        import csv
-        from migrate_csv import migrate
-        raw = '&bull; Contact john@example.com'
-        self.source.write_text(raw + '\n')
-        legacy = self.root / 'legacy.csv'
-        text = raw
-        labels = [[raw.index('john@'), raw.index('john@') + 16, 'MAIL']]
-        with legacy.open('w', newline='') as stream:
-            writer = csv.writer(stream)
-            writer.writerow(['chronologic_id', 'hash_key', 'text', 'labels', 'edited'])
-            writer.writerow([1, editor.text_hash(text), text,
-                             json.dumps(labels), True])
-        original = legacy.read_bytes()
-        self.assertEqual(migrate(legacy, self.db), 1)
-        self.assertEqual(legacy.read_bytes(), original)
+    def test_adjacent_same_labels_survive_prediction_save_and_reload(self):
+        text = 'OneTwoThree Four Five'
+        labels = [[0, 3, 'MAIL'], [3, 6, 'MAIL'], [6, 11, 'MAIL'],
+                  [12, 16, 'MAIL'], [17, 21, 'MAIL']]
+        self.source.write_text(text + '\n')
         editor.initialize(str(self.config))
-        self.assertTrue(self.record()['saved'])
-        self.assertEqual(self.record()['hash_key'], editor.text_hash(raw))
+        self.assertEqual(editor.prediction_labels(labels, text, {'MAIL': 'MAIL'}), labels)
+        self.assertEqual(self.change('labels', labels=labels[::-1]).status_code, 200)
+        self.assertEqual(self.change('save').status_code, 200)
+        stored = json.loads(self.db.read_text())
+        self.assertEqual(set(stored), {'hash_key', 'text', 'labels', 'edited'})
+        editor.initialize(str(self.config))
         self.assertEqual(self.record()['labels'], labels)
-        with self.assertRaisesRegex(ValueError, 'already exists'):
-            migrate(legacy, self.db)
+        remaining = labels[:1] + labels[2:]
+        self.assertEqual(self.change('labels', labels=remaining).status_code, 200)
+        self.assertEqual(self.record()['labels'], remaining)
 
     def test_invalid_database_is_not_overwritten(self):
         self.db.write_text('invalid,csv\n1,2\n')
