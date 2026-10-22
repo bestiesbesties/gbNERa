@@ -1,5 +1,8 @@
 let state = null;
 let active = 0;
+let activeView = 'input';
+let databaseKey = null;
+let chooseInitial = true;
 let selection = null;
 let editing = false;
 let busy = false;
@@ -8,7 +11,66 @@ let activated = '';
 let refreshNumber = 0;
 let pollTimer;
 const $ = id => document.getElementById(id);
-const current = () => state?.texts[active];
+const current = () => activeView === 'database'
+  ? state?.database.find(record => record.hash_key === databaseKey)
+  : state?.texts[active];
+const skipSaved = () => state.config.settings?.skip_saved !== false;
+
+function initialIndex() {
+  return skipSaved() ? state.texts.findIndex(record => !record.saved) : (state.texts.length ? 0 : -1);
+}
+function navigationIndex(direction) {
+  const rows = activeView === 'database' ? state.database : state.texts;
+  const start = activeView === 'database' ? rows.findIndex(row => row.hash_key === databaseKey) : active;
+  for (let index = start + direction; index >= 0 && index < rows.length; index += direction) {
+    if (activeView === 'database' || !skipSaved() || !rows[index].saved) return index;
+  }
+  return -1;
+}
+function openRow(view, index) {
+  if (busy || editing) return;
+  activeView = view;
+  if (view === 'database') databaseKey = state.database[index].hash_key;
+  else active = index;
+  selection = null;
+  render();
+  activateCurrent();
+}
+function navigate(direction) {
+  const index = navigationIndex(direction);
+  if (index !== -1) openRow(activeView, index);
+}
+function renderLists() {
+  for (const [id, view, rows] of [['left-view', 'input', state.texts], ['right-view', 'database', state.database || []]]) {
+    const list = $(id);
+    list.replaceChildren();
+    rows.forEach((record, index) => {
+      const row = document.createElement('button');
+      row.className = 'text-row';
+      const selected = record.hash_key === current()?.hash_key;
+      row.classList.toggle('active', selected);
+      row.setAttribute('aria-current', String(selected));
+      row.disabled = busy || editing;
+      row.title = record.text;
+      const number = document.createElement('span');
+      number.className = 'row-number';
+      number.textContent = view === 'input' ? index + 1 : record.number;
+      const preview = document.createElement('span');
+      preview.className = 'row-preview';
+      preview.textContent = record.text;
+      row.append(number, preview);
+      if (view === 'input') {
+        const icon = document.createElement('span');
+        icon.className = 'database-status ' + (record.saved ? 'is-saved' : 'is-unsaved');
+        icon.setAttribute('role', 'img');
+        icon.setAttribute('aria-label', record.saved ? 'In database' : 'Not in database');
+        row.append(icon);
+      }
+      row.addEventListener('click', () => openRow(view, index));
+      list.append(row);
+    });
+  }
+}
 
 function message(text, error = false) {
   $('message').textContent = text;
@@ -25,7 +87,11 @@ async function refresh() {
   const result = await api('/api/state');
   if (number !== refreshNumber) return;
   state = result;
-  active = Math.min(active, Math.max(0, state.texts.length - 1));
+  if (chooseInitial) {
+    activeView = 'input';
+    active = initialIndex();
+    chooseInitial = false;
+  }
   render();
   await activateCurrent();
   schedulePoll();
@@ -33,11 +99,11 @@ async function refresh() {
 async function activateCurrent() {
   const record = current();
   if (!record) return;
-  const token = JSON.stringify([state.revision, active, record.hash_key]);
+  const token = JSON.stringify([state.revision, activeView, active, record.hash_key]);
   if (token === activated) return;
   activated = token;
   try {
-    await api(`/api/text/${active}/activate`, {hash_key: record.hash_key, revision: state.revision});
+    await api(activeView === 'database' ? `/api/database/${record.hash_key}/activate` : `/api/text/${active}/activate`, {hash_key: record.hash_key, revision: state.revision});
     await refresh();
   } catch (error) {
     if (activated === token) activated = "";
@@ -57,18 +123,20 @@ function render() {
     indicator.title = detail;
   }
   const record = current();
-  $('counter').textContent = `${record ? active + 1 : 0}/${state.texts.length}`;
-  $('hash').textContent = record ? 'hashkey: ' + record.hash_key : 'No text loaded';
+  renderLists();
+  const databaseView = activeView === 'database';
+  $('counter').textContent = databaseView ? `DB ${record?.number || 0}/${state.database.length}` : `${record ? active + 1 : 0}/${state.texts.length}`;
+  $('hash').textContent = record ? 'hashkey: ' + record.hash_key : (state.texts.length ? 'All input texts are saved' : 'No text loaded');
   $('hash').title = record?.hash_key || '';
-  $('previous').disabled = !record || active === 0 || editing || busy;
-  $('next').disabled = !record || active === state.texts.length - 1 || editing || busy;
+  $('previous').disabled = navigationIndex(-1) === -1 || editing || busy;
+  $('next').disabled = navigationIndex(1) === -1 || editing || busy;
   $('edit').disabled = !record || busy || editing;
-  $('saved').disabled = !record || busy || editing;
+  $('saved').disabled = !record || busy || editing || (databaseView && !record.in_input);
   $('saved').setAttribute('aria-checked', String(Boolean(record?.saved)));
-  $('saved').title = record?.saved ? 'Remove text from database' : 'Save text to database';
+  $('saved').title = databaseView && record && !record.in_input ? 'This text is absent from the TXT and cannot be removed' : record?.saved ? 'Remove text from database' : 'Save text to database';
   $('saved').setAttribute('aria-label', $('saved').title);
   $('saved').querySelector('img').src = `/icons/checkbox_${record?.saved ? 'checked' : 'unchecked'}.png`;
-  $('save-changes').hidden = !(record?.saved && record.dirty);
+  $('save-changes').hidden = !(record?.saved && record.dirty && !databaseView);
   $('save-changes').disabled = busy || editing;
   $('text-status').textContent = !record ? '' : record.dirty ? (record.saved ? 'Saved in database · unsaved annotation changes' : 'Not saved · unsaved annotation changes') : record.saved ? 'Saved in database' : record.prediction === 'pending' ? 'Predicting in the background…' : record.prediction === 'error' ? 'Prediction failed: ' + (record.prediction_error || 'Unknown error') : record.prediction === 'ready' ? 'Predictions ready · not saved' : 'Not saved';
   $('annotation-list').textContent = record ? '[' + record.labels.map(item => '[' + item.map(value => JSON.stringify(value)).join(', ') + ']').join(', ') + ']' : '';
@@ -78,7 +146,7 @@ function render() {
     selection = null;
     const container = $('text');
     container.replaceChildren();
-    if (!record) container.textContent = 'Load a TXT file to start labeling.';
+    if (!record) container.textContent = '';
     else {
       // Array.from uses Unicode code points, matching Python string offsets.
       const chars = Array.from(record.text);
@@ -152,10 +220,17 @@ async function mutate(action, extra = {}) {
   busy = true;
   render();
   try {
-    await api(`/api/text/${active}`, {action, hash_key: current().hash_key, ...extra});
+    const key = current().hash_key;
+    const directSave = activeView === 'database';
+    const result = await api(directSave ? `/api/database/${key}` : `/api/text/${active}`, {action, hash_key: key, ...extra});
+    if (directSave && action === 'edit') databaseKey = result.hash_key;
+    if (directSave && action === 'remove') {
+      activeView = 'input';
+      active = state.texts.findIndex(record => record.hash_key === key);
+    }
     if (action === 'edit') closeEditor();
     await refresh();
-    message(action === 'save' ? 'Text and annotations saved.' : action === 'remove' ? 'Text removed from database.' : 'Changes are in memory. Save explicitly to keep them in the database.');
+    message(action === 'save' ? 'Text and annotations saved.' : action === 'remove' ? 'Text removed from database.' : directSave ? 'Changes saved to the database.' : 'Changes are in memory. Save explicitly to keep them in the database.');
   } catch (error) { message(error.message, true); }
   finally { busy = false; render(); }
 }
@@ -169,7 +244,7 @@ for (const form of document.querySelectorAll('.live-item')) {
     indicator.classList.add('busy');
     try {
       await api('/api/settings', {key: form.dataset.key, value: form.querySelector('input').value});
-      if (form.dataset.key !== 'inference_url') { active = 0; closeEditor(); }
+      if (form.dataset.key !== 'inference_url') { chooseInitial = true; closeEditor(); }
       await refresh();
       message('Setting applied. File paths are relative to the app folder unless absolute.');
     } catch (error) {
@@ -179,12 +254,15 @@ for (const form of document.querySelectorAll('.live-item')) {
     } finally { indicator.classList.remove('busy'); busy = false; render(); }
   });
 }
-$('previous').onclick = () => { active--; selection = null; render(); activateCurrent(); };
-$('next').onclick = () => { active++; selection = null; render(); activateCurrent(); };
+$('previous').onclick = () => navigate(-1);
+$('next').onclick = () => navigate(1);
 $('saved').onclick = () => mutate(current().saved ? 'remove' : 'save');
 $('save-changes').onclick = () => mutate('save');
 $('edit').onclick = () => {
   editing = true;
+  $('edit-help').textContent = activeView === 'database'
+    ? 'Enter saves the edited text directly to the database and clears its labels. Escape cancels.'
+    : 'Enter applies the edit, clears labels and removes the old saved record. Save the edited text explicitly. Escape cancels.';
   $('edit-text').value = current().text;
   $('text').hidden = true;
   $('edit-area').hidden = false;

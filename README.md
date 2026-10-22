@@ -17,13 +17,19 @@ Open http://127.0.0.1:5000. Python 3.10 or newer is recommended.
 
 Enter a path or endpoint in the livebar and press **Enter** to apply it. Paths refer to files on the computer running Flask; relative paths start in the app folder. Input files must be UTF-8, with one text per line. Empty lines are skipped. The JSONL path may name a new file in an existing directory; the file is only created on explicit save.
 
+The left view lists the loaded TXT lines in source order. Its database icons are green for saved texts and red for unsaved texts. The right view lists every database record in reverse file order, including records absent from the TXT. Click any row to open it; matching rows are highlighted in both views. Both lists scroll independently and remain visible on narrow screens (the page scrolls horizontally when needed).
+
+`settings.skip_saved` in `config.json` defaults to `true`. On opening or reloading the input/config/database, the editor selects the first unsaved input text, or stays empty if all are saved. Input arrow navigation skips saved texts in either direction; clicking a row always opens it. Set this option to `false` and reapply the config to start with the first text and navigate every input line. Saving never advances the editor. After opening a database row, the arrows browse the database in its displayed order and the counter shows its database-file number.
+
 Select text and click a colored label button. Click an annotated span to remove it. Overlapping spans are rejected. Navigate with the arrows; manual annotation changes stay in memory during navigation. Leading and trailing whitespace is excluded when applying a label; spaces within a span are preserved. The neutral list below the text status shows the current annotations, including unsaved changes to saved texts. Untouched predictions are discarded when leaving a text.
 
 **Right Arrow** moves to the next text, **Left Arrow** moves to the previous text, and **Enter** toggles the saved checkbox. These shortcuts pause while typing in settings fields or editing the main text. In the text editor, **Enter** applies edits and arrow keys move the cursor without navigating between texts.
 
-The checkbox shows whether a text is in the JSONL. Checking it saves the text and its current labels; unchecking it removes the row. Changes to an already saved text's annotations stay in memory until you click **Save changes**. Predictions never save automatically.
+When working from the left view, the checkbox shows whether a text is in the JSONL. Checking it saves the text and its current labels; unchecking it removes the row. Changes to an already saved text's annotations stay in memory until you click **Save changes**. Predictions never save automatically.
 
-The edit icon opens a text field. **Enter** applies the edit; **Escape** cancels it. Applying an edit removes the old saved row, clears all annotations and changes the SHA-256 hash. The changed text remains unsaved. The source TXT is not rewritten. Identical input lines share annotations and editing one updates all identical occurrences in the current session. Editing into another existing text is rejected to avoid replacing its annotations.
+Changes made from the right view save directly to the database. Editing its text clears the labels, updates the hash and preserves its file position. Unchecking removes the record only if it belongs to the loaded input; database-only records have removal disabled. Removing a shared record keeps that text open in the input view.
+
+When working from the left view, the edit icon opens a text field. **Enter** applies the edit; **Escape** cancels it. Applying an edit removes the old saved row, clears all annotations and changes the SHA-256 hash. The changed text remains unsaved. The source TXT is not rewritten. Identical input lines share annotations and editing one updates all identical occurrences in the current session. Editing into another existing text is rejected to avoid replacing its annotations.
 
 Reloading the input, switching the database/config or restarting the server discards unsaved work. A browser refresh keeps server memory. This is a local, single-user app; open tabs share the same session. Avoid editing the JSONL externally while the server is running.
 

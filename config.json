@@ -31,6 +31,7 @@
     "config_path": "config.json",
     "input_path": "sample_data.txt",
     "database_path": "annotations2.jsonl",
-    "inference_url": "http://127.0.0.1:8081/inference"
+    "inference_url": "http://127.0.0.1:8081/inference",
+    "skip_saved": true
   }
 }

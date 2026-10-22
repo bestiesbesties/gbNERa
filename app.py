@@ -104,6 +104,9 @@ def read_config(path):
     settings = value.setdefault('settings', {})
     for key in ['input_path', 'database_path', 'inference_url']:
         settings.setdefault(key, '')
+    settings.setdefault('skip_saved', True)
+    if type(settings['skip_saved']) is not bool:
+        raise ValueError('skip_saved must be true or false.')
     settings['config_path'] = str(path.resolve())
     return value
 
@@ -175,7 +178,8 @@ def reload_texts(lines):
     global texts, records, generation
     generation += 1
     texts = [text_hash(line) for line in lines]
-    records = {text_hash(line): make_record(line) for line in lines}
+    records = {key: make_record(row['text']) for key, row in database.items()}
+    records.update({text_hash(line): make_record(line) for line in lines})
 
 
 def reset_prediction():
@@ -246,6 +250,15 @@ def activate_text(index):
     return jsonify(ok=True)
 
 
+@app.post('/api/database/<key>/activate')
+def activate_database(key):
+    with lock:
+        if key not in database or request.get_json().get('revision') != revision:
+            raise ValueError('The database changed. Please refresh and try again.')
+        start_prediction(key)
+    return jsonify(ok=True)
+
+
 @app.get('/')
 def index():
     return render_template('index.html')
@@ -259,7 +272,9 @@ def icon(name):
 @app.get('/api/state')
 def state():
     with lock:
-        return jsonify(config=config, status=status, revision=revision, texts=[records[key] for key in texts])
+        return jsonify(config=config, status=status, revision=revision, texts=[records[key] for key in texts],
+                       database=[dict(records[key], in_input=key in texts, number=number)
+                                 for number, key in reversed(list(enumerate(database, 1)))])
 
 
 @app.post('/api/settings')
@@ -296,20 +311,32 @@ def settings():
 
 
 @app.post('/api/text/<int:index>')
-def update_text(index):
+@app.post('/api/database/<key>')
+def update_text(index=None, key=None):
     global database
     data = request.get_json()
     with lock:
-        if not 0 <= index < len(texts):
-            raise ValueError('Text is no longer available.')
-        key = texts[index]
+        direct_save = key is not None
+        if direct_save:
+            if key not in database:
+                raise ValueError('Database record is no longer available.')
+        else:
+            if not 0 <= index < len(texts):
+                raise ValueError('Text is no longer available.')
+            key = texts[index]
         if data.get('hash_key') != key:
             raise ValueError('The active text changed. Please try again.')
         record = records[key]
         action = data['action']
         if action == 'labels':
-            record['labels'] = validate_labels(data['labels'], record['text'], {label['short_name'] for label in config['labels']})
-            record.update(touched=True, dirty=True, edited=True, prediction='manual')
+            labels = validate_labels(data['labels'], record['text'], {label['short_name'] for label in config['labels']})
+            if direct_save:
+                rows = database.copy()
+                rows[key] = dict(rows[key], labels=labels, edited=True)
+                write_database(rows)
+                database = rows
+            record['labels'] = labels
+            record.update(touched=True, dirty=not direct_save, edited=True, prediction='manual')
         elif action == 'save':
             rows = database.copy()
             rows[key] = dict(hash_key=key,
@@ -320,6 +347,8 @@ def update_text(index):
             database = rows
             record.update(saved=True, dirty=False, touched=True)
         elif action == 'remove':
+            if key not in texts:
+                raise ValueError('Only texts in the loaded TXT can be removed.')
             rows = {k: row for k, row in database.items() if k != key}
             write_database(rows)
             database = rows
@@ -329,12 +358,18 @@ def update_text(index):
             if not isinstance(text, str) or not text.strip():
                 raise ValueError('Text cannot be empty.')
             if text == record['text']:
-                return jsonify(ok=True)
+                return jsonify(ok=True, hash_key=key)
             new_key = text_hash(text)
             if new_key in records or new_key in database:
                 raise ValueError('That text already exists. Choose a different text to avoid replacing its annotations.')
             if record['saved']:
-                rows = {k: row for k, row in database.items() if k != key}
+                replacement = dict(hash_key=new_key, text=text, labels=[], edited=True)
+                rows = {}
+                for old_key, row in database.items():
+                    if old_key != key:
+                        rows[old_key] = row
+                    elif direct_save:
+                        rows[new_key] = replacement
                 write_database(rows)
                 database = rows
             # Identical source lines share the same record and are edited together.
@@ -344,7 +379,7 @@ def update_text(index):
             records[new_key].update(touched=True, prediction='manual')
         else:
             raise ValueError('Unknown action.')
-    return jsonify(ok=True)
+    return jsonify(ok=True, hash_key=records[new_key]['hash_key'] if action == 'edit' else key)
 
 
 @app.errorhandler(Exception)

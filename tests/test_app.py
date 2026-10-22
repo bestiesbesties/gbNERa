@@ -45,6 +45,69 @@ class EditorTests(unittest.TestCase):
             time.sleep(.01)
         self.fail('Prediction did not finish')
 
+    def test_database_only_records_and_reverse_order(self):
+        self.change('save')
+        extra = 'Database only text'
+        key = editor.text_hash(extra)
+        rows = editor.database.copy()
+        rows[key] = dict(hash_key=key, text=extra, labels=[], edited=False)
+        editor.write_database(rows)
+        editor.initialize(str(self.config))
+        state = self.client.get('/api/state').json
+        self.assertEqual([row['number'] for row in state['database']], [2, 1])
+        self.assertFalse(state['database'][0]['in_input'])
+        self.assertEqual(self.client.post(f'/api/database/{key}/activate', json={
+            'revision': state['revision']}).status_code, 200)
+        endpoint = f'/api/database/{key}'
+        self.assertEqual(self.client.post(endpoint, json={
+            'action': 'remove', 'hash_key': key}).status_code, 400)
+        self.assertEqual(self.client.post(endpoint, json={
+            'action': 'labels', 'hash_key': key, 'labels': [[0, 8, 'MAIL']]}).status_code, 200)
+        self.assertEqual(editor.load_database(str(self.db))[key]['labels'], [[0, 8, 'MAIL']])
+        unchanged = self.client.post(endpoint, json={
+            'action': 'edit', 'hash_key': key, 'text': extra})
+        self.assertEqual(unchanged.json['hash_key'], key)
+        changed = self.client.post(endpoint, json={
+            'action': 'edit', 'hash_key': key, 'text': 'Changed database text'})
+        new_key = changed.json['hash_key']
+        stored = editor.load_database(str(self.db))
+        self.assertNotIn(key, stored)
+        self.assertEqual(list(stored)[-1], new_key)
+        self.assertEqual(stored[new_key]['labels'], [])
+        self.assertTrue(self.client.get('/api/state').json['database'][0]['saved'])
+
+    def test_database_input_edits_and_removal(self):
+        self.change('save')
+        key = self.record()['hash_key']
+        result = self.client.post(f'/api/database/{key}', json={
+            'action': 'edit', 'hash_key': key, 'text': 'Updated input'})
+        new_key = result.json['hash_key']
+        self.assertEqual(self.record()['hash_key'], new_key)
+        self.assertTrue(self.record()['saved'])
+        self.assertEqual(self.client.post(f'/api/database/{new_key}', json={
+            'action': 'remove', 'hash_key': new_key}).status_code, 200)
+        self.assertFalse(self.record()['saved'])
+
+    def test_failed_direct_write_preserves_labels(self):
+        self.change('save')
+        key = self.record()['hash_key']
+        with patch.object(editor, 'write_database', side_effect=OSError('Write failed')):
+            result = self.client.post(f'/api/database/{key}', json={
+                'action': 'labels', 'hash_key': key, 'labels': [[2, 9, 'MAIL']]})
+        self.assertEqual(result.status_code, 400)
+        self.assertEqual(self.record()['labels'], [])
+
+    def test_skip_saved_config_validation(self):
+        self.assertTrue(editor.config['settings']['skip_saved'])
+        value = json.loads(self.config.read_text())
+        value['settings']['skip_saved'] = False
+        self.config.write_text(json.dumps(value))
+        self.assertFalse(editor.read_config(self.config)['settings']['skip_saved'])
+        value['settings']['skip_saved'] = 'false'
+        self.config.write_text(json.dumps(value))
+        with self.assertRaises(ValueError):
+            editor.read_config(self.config)
+
     def test_explicit_save_edit_and_reload(self):
         self.assertFalse(self.db.exists())
         self.assertEqual(self.change('labels', labels=[[10, 26, 'MAIL']]).status_code, 200)

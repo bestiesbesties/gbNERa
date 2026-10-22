@@ -90,3 +90,39 @@ test('applying the same label next to another span keeps both offsets', () => {
   assert.deepEqual(JSON.parse(JSON.stringify(context.change.data.labels)),
     [[0, 4, 'NAME'], [4, 9, 'NAME']]);
 });
+
+
+test('initial selection and both navigation directions skip saved input', () => {
+  const {context} = setup({text: 'Saved', labels: [], saved: true});
+  vm.runInContext(`state.config.settings = {skip_saved: true};
+    state.texts = [record, {saved: false}, {saved: true}, {saved: false}];
+    active = initialIndex();`, context);
+  assert.equal(vm.runInContext('active', context), 1);
+  assert.equal(vm.runInContext('navigationIndex(1)', context), 3);
+  assert.equal(vm.runInContext('navigationIndex(-1)', context), -1);
+  vm.runInContext('active = 3;', context);
+  assert.equal(vm.runInContext('navigationIndex(-1)', context), 1);
+  vm.runInContext('state.config.settings.skip_saved = false;', context);
+  assert.equal(vm.runInContext('initialIndex()', context), 0);
+  assert.equal(vm.runInContext('navigationIndex(-1)', context), 2);
+});
+
+test('all saved starts empty but rows remain available', () => {
+  const {context, element} = setup({text: 'Saved', hash_key: 'a', labels: [], saved: true});
+  vm.runInContext('active = initialIndex(); render();', context);
+  assert.equal(vm.runInContext('active', context), -1);
+  assert.equal(element('text').textContent, '');
+  assert.equal(element('left-view').children.length, 1);
+});
+
+test('database navigation includes saved rows and disables database-only removal', () => {
+  const {context, element} = setup({text: 'Saved', hash_key: 'a', labels: [], saved: true});
+  vm.runInContext(`state.database = [{...record, number: 2, in_input: false},
+    {...record, hash_key: 'b', number: 1, in_input: true}];
+    activeView = 'database'; databaseKey = 'a'; render();`, context);
+  assert.equal(vm.runInContext('navigationIndex(1)', context), 1);
+  assert.equal(element('saved').disabled, true);
+  assert.equal(element('counter').textContent, 'DB 2/2');
+  vm.runInContext("databaseKey = 'b'; render();", context);
+  assert.equal(element('saved').disabled, false);
+});
