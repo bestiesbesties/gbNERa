@@ -7,3 +7,6 @@ sample_data.txt
 annotations.jsonl
 annotations2.jsonl
 annotations3.jsonl
+.old/
+old/
+test.*
