@@ -8,8 +8,12 @@
   <script src="/static/app.js" defer></script>
 </head>
 <body>
-  <header class="livebar" aria-label="Files and inference settings">
-    {% for key, title, icon, placeholder in [('input_path', 'Input TXT file', 'input_txt-file', '/path/to/texts.txt'), ('config_path', 'General config JSON', 'general_config', '/path/to/config.json'), ('inference_url', 'Inference endpoint', 'inference_endpoint', 'http://localhost:8080/predict'), ('database_path', 'JSONL database', 'csv-database', '/path/to/annotations.jsonl')] %}
+  <header class="topbar"><h1>Annotatietool</h1></header>
+<main>
+  <aside class="side-view" aria-labelledby="input-heading"><h2 id="input-heading">Input</h2><div id="left-view"></div></aside>
+  <div class="center-column">
+  <section class="livebar" aria-label="Files and inference settings">
+    {% for key, title, icon, placeholder in [('input_path', 'Input TXT file', 'input_txt-file_new', '/path/to/texts.txt'), ('config_path', 'General config JSON', 'general_config_new', '/path/to/config.json'), ('inference_url', 'Inference endpoint', 'inference_endpoint_new', 'http://localhost:8080/predict'), ('database_path', 'JSONL database', 'database_new', '/path/to/annotations.jsonl')] %}
     <form class="live-item" data-key="{{ key }}">
       <div class="live-icon"><img src="/icons/{{ icon }}.png" alt="{{ title }}"><img class="status" src="/icons/not-connected.png" alt="Not configured"></div>
       <label class="sr-only" for="{{ key }}">{{ title }}</label>
@@ -17,10 +21,7 @@
       <button class="sr-only" type="submit">Apply {{ title }}</button>
     </form>
     {% endfor %}
-  </header>
-<main>
-  <aside id="left-view" class="side-view" aria-label="Input texts"></aside>
-  <div class="center-column">
+  </section>
   <section class="center-view" aria-label="Annotation editor">
     <div class="editor-body">
       <div class="text-heading"><div><strong id="counter">0/0</strong><span id="hash">No text loaded</span></div><button id="edit" class="icon-button" title="Edit text" aria-label="Edit text"><img src="/icons/edit.png" alt=""></button></div>
@@ -32,7 +33,7 @@
   </section>
   <p id="message" role="status">Enter file paths above and press Enter to apply. Select text, then choose a label. Click a span to remove it.</p>
   </div>
-  <aside id="right-view" class="side-view" aria-label="Database texts, last record first"></aside>
+  <aside class="side-view" aria-labelledby="database-heading"><h2 id="database-heading">Database</h2><div id="right-view" aria-label="Database texts, last record first"></div></aside>
 </main>
 </body>
 </html>
