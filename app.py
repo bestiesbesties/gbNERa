@@ -329,6 +329,7 @@ def update_text(index=None, key=None):
         record = records[key]
         action = data['action']
         if action == 'labels':
+            direct_save = key in database
             labels = validate_labels(data['labels'], record['text'], {label['short_name'] for label in config['labels']})
             if direct_save:
                 rows = database.copy()

@@ -136,8 +136,6 @@ function render() {
   $('saved').title = databaseView && record && !record.in_input ? 'This text is absent from the TXT and cannot be removed' : record?.saved ? 'Remove text from database' : 'Save text to database';
   $('saved').setAttribute('aria-label', $('saved').title);
   $('saved').querySelector('img').src = `/icons/checkbox_${record?.saved ? 'checked' : 'unchecked'}.png`;
-  $('save-changes').hidden = !(record?.saved && record.dirty && !databaseView);
-  $('save-changes').disabled = busy || editing;
   $('text-status').textContent = !record ? '' : record.dirty ? (record.saved ? 'Saved in database · unsaved annotation changes' : 'Not saved · unsaved annotation changes') : record.saved ? 'Saved in database' : record.prediction === 'pending' ? 'Predicting in the background…' : record.prediction === 'error' ? 'Prediction failed: ' + (record.prediction_error || 'Unknown error') : record.prediction === 'ready' ? 'Predictions ready · not saved' : 'Not saved';
   $('annotation-list').textContent = record ? '[' + record.labels.map(item => '[' + item.map(value => JSON.stringify(value)).join(', ') + ']').join(', ') + ']' : '';
   const signature = JSON.stringify([active, record?.text, record?.labels, state.config.labels]);
@@ -222,6 +220,7 @@ async function mutate(action, extra = {}) {
   try {
     const key = current().hash_key;
     const directSave = activeView === 'database';
+    const savesAnnotations = action === 'labels' && current().saved;
     const result = await api(directSave ? `/api/database/${key}` : `/api/text/${active}`, {action, hash_key: key, ...extra});
     if (directSave && action === 'edit') databaseKey = result.hash_key;
     if (directSave && action === 'remove') {
@@ -230,7 +229,7 @@ async function mutate(action, extra = {}) {
     }
     if (action === 'edit') closeEditor();
     await refresh();
-    message(action === 'save' ? 'Text and annotations saved.' : action === 'remove' ? 'Text removed from database.' : directSave ? 'Changes saved to the database.' : 'Changes are in memory. Save explicitly to keep them in the database.');
+    message(action === 'save' ? 'Text and annotations saved.' : action === 'remove' ? 'Text removed from database.' : (directSave || savesAnnotations) ? 'Changes saved to the database.' : 'Changes are in memory. Save explicitly to keep them in the database.');
   } catch (error) { message(error.message, true); }
   finally { busy = false; render(); }
 }
@@ -257,7 +256,6 @@ for (const form of document.querySelectorAll('.live-item')) {
 $('previous').onclick = () => navigate(-1);
 $('next').onclick = () => navigate(1);
 $('saved').onclick = () => mutate(current().saved ? 'remove' : 'save');
-$('save-changes').onclick = () => mutate('save');
 $('edit').onclick = () => {
   editing = true;
   $('edit-help').textContent = activeView === 'database'

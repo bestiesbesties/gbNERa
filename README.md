@@ -21,11 +21,11 @@ The left view lists the loaded TXT lines in source order. Its database icons are
 
 `settings.skip_saved` in `config.json` defaults to `true`. On opening or reloading the input/config/database, the editor selects the first unsaved input text, or stays empty if all are saved. Input arrow navigation skips saved texts in either direction; clicking a row always opens it. Set this option to `false` and reapply the config to start with the first text and navigate every input line. Saving never advances the editor. After opening a database row, the arrows browse the database in its displayed order and the counter shows its database-file number.
 
-Select text and click a colored label button. Click an annotated span to remove it. Overlapping spans are rejected. Navigate with the arrows; manual annotation changes stay in memory during navigation. Leading and trailing whitespace is excluded when applying a label; spaces within a span are preserved. The neutral list below the text status shows the current annotations, including unsaved changes to saved texts. Untouched predictions are discarded when leaving a text.
+Select text and click a colored label button. Click an annotated span to remove it. Overlapping spans are rejected. Navigate with the arrows; annotation changes to unsaved texts stay in memory during navigation. Leading and trailing whitespace is excluded when applying a label; spaces within a span are preserved. The neutral list below the text status shows the current annotations, including pending changes to unsaved texts. Untouched predictions are discarded when leaving a text.
 
 **Right Arrow** moves to the next text, **Left Arrow** moves to the previous text, and **Enter** toggles the saved checkbox. These shortcuts pause while typing in settings fields or editing the main text. In the text editor, **Enter** applies edits and arrow keys move the cursor without navigating between texts.
 
-When working from the left view, the checkbox shows whether a text is in the JSONL. Checking it saves the text and its current labels; unchecking it removes the row. Changes to an already saved text's annotations stay in memory until you click **Save changes**. Predictions never save automatically.
+When working from the left view, the checkbox shows whether a text is in the JSONL. Checking it saves the text and its current labels; unchecking it removes the row. Changes to an already saved text's annotations save immediately, whether you opened it from the left or right view. Predictions never save automatically.
 
 Changes made from the right view save directly to the database. Editing its text clears the labels, updates the hash and preserves its file position. Unchecking removes the record only if it belongs to the loaded input; database-only records have removal disabled. Removing a shared record keeps that text open in the input view.
 
@@ -74,3 +74,5 @@ Text is displayed safely as plain text. On load, hashes, annotation offsets and 
 ```
 
 Tests cover explicit saving, reloads, edits/removals, JSONL punctuation and multiline round trips, source-text hashing and adjacent identical labels, invalid spans, failed settings and delayed background predictions. With Node.js installed, run `node --test tests/test_frontend.cjs` for selection trimming, individual span rendering/removal, and live annotation status checks.
+
+The browser layout regression test uses Playwright to compare character positions before annotation, after annotation, and after removal. It covers partial words, adjacent spans, wrapping, Unicode, whitespace, and selection offsets. With `playwright` installed and its Chromium browser available, run `node --test tests/test_layout.cjs`. To use an installed Google Chrome instead, run `PLAYWRIGHT_CHANNEL=chrome node --test tests/test_layout.cjs`.

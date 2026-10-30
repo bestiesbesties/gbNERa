@@ -97,6 +97,31 @@ class EditorTests(unittest.TestCase):
         self.assertEqual(result.status_code, 400)
         self.assertEqual(self.record()['labels'], [])
 
+    def test_saved_input_annotations_persist_immediately(self):
+        self.change('save')
+        key = self.record()['hash_key']
+        for labels in ([[2, 9, 'MAIL']], []):
+            with self.subTest(labels=labels):
+                self.assertEqual(self.change('labels', labels=labels).status_code, 200)
+                self.assertEqual(editor.load_database(str(self.db))[key]['labels'], labels)
+                state = self.client.get('/api/state').json
+                self.assertEqual(state['database'][0]['labels'], labels)
+                self.assertFalse(self.record()['dirty'])
+                editor.initialize(str(self.config))
+                self.assertEqual(self.record()['labels'], labels)
+                self.assertTrue(self.record()['saved'])
+
+    def test_failed_saved_input_write_preserves_annotations(self):
+        self.change('labels', labels=[[2, 9, 'MAIL']])
+        self.change('save')
+        before = self.record()
+        stored = self.db.read_text()
+        with patch.object(editor, 'write_database', side_effect=OSError('Write failed')):
+            result = self.change('labels', labels=[])
+        self.assertEqual(result.status_code, 400)
+        self.assertEqual(self.record(), before)
+        self.assertEqual(self.db.read_text(), stored)
+
     def test_skip_saved_config_validation(self):
         self.assertTrue(editor.config['settings']['skip_saved'])
         value = json.loads(self.config.read_text())
@@ -117,7 +142,7 @@ class EditorTests(unittest.TestCase):
         self.assertTrue(self.record()['saved'])
         self.assertEqual(self.record()['labels'], [[10, 26, 'MAIL']])
         self.change('labels', labels=[])
-        self.assertEqual(next(iter(editor.load_database(str(self.db)).values()))['labels'], [[10, 26, 'MAIL']])
+        self.assertEqual(next(iter(editor.load_database(str(self.db)).values()))['labels'], [])
         old_hash = self.record()['hash_key']
         self.change('edit', text='A changed sentence')
         self.assertNotEqual(self.record()['hash_key'], old_hash)
